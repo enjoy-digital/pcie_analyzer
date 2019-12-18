@@ -33,6 +33,12 @@ _io = [
     ("user_led", 2, Pins("T25"), IOStandard("LVCMOS33")),
     ("user_led", 3, Pins("R26"), IOStandard("LVCMOS33")),
 
+
+    ("pcie_refclk", 0,
+        Subsignal("p", Pins("F11")),
+        Subsignal("n", Pins("E11"))
+    ),
+
     ("pcie_tx", 0,
         Subsignal("p", Pins("D10")),
         Subsignal("n", Pins("C10"))
@@ -71,7 +77,7 @@ class _CRG(Module):
 
 
 class GTPTestSoC(SoCMini):
-    def __init__(self, platform, connector="pcie", linerate=2.5e9, with_loopback=True):
+    def __init__(self, platform, connector="pcie", linerate=2.5e9, use_pcie_refclk=True, with_loopback=True):
         assert connector in ["pcie"]
         sys_clk_freq = int(100e6)
 
@@ -82,12 +88,23 @@ class GTPTestSoC(SoCMini):
         self.submodules.crg = _CRG(platform, sys_clk_freq)
 
         # GTP RefClk -------------------------------------------------------------------------------
-        refclk = Signal()
-        self.comb += refclk.eq(ClockSignal("clk125"))
-        platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-49]")
+        if use_pcie_refclk:
+            refclk      = Signal()
+            refclk_freq = 100e6
+            refclk_pads = platform.request("pcie_refclk")
+            self.specials += Instance("IBUFDS_GTE2",
+                i_CEB   = 0,
+                i_I     = refclk_pads.p,
+                i_IB    = refclk_pads.n,
+                o_O     = refclk)
+        else:
+            refclk      = Signal()
+            refclk_freq = 125e6
+            self.comb += refclk.eq(ClockSignal("clk125"))
+            platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-49]")
 
         # GTP PLL ----------------------------------------------------------------------------------
-        qpll = GTPQuadPLL(refclk, 125e6, linerate)
+        qpll = GTPQuadPLL(refclk, refclk_freq, linerate)
         print(qpll)
         self.submodules += qpll
 
