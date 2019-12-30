@@ -7,8 +7,6 @@ import sys
 
 from migen import *
 
-from litex_boards.platforms import ac701
-
 from litex.build.generic_platform import *
 from litex.build.xilinx import XilinxPlatform
 
@@ -33,7 +31,6 @@ _io = [
     ("user_led", 2, Pins("T25"), IOStandard("LVCMOS33")),
     ("user_led", 3, Pins("R26"), IOStandard("LVCMOS33")),
 
-
     ("pcie_refclk", 0,
         Subsignal("p", Pins("F11")),
         Subsignal("n", Pins("E11"))
@@ -46,6 +43,15 @@ _io = [
     ("pcie_rx", 0,
         Subsignal("p", Pins("D12")),
         Subsignal("n", Pins("C12"))
+    ),
+
+    ("pcie_tx", 1,
+        Subsignal("p", Pins("B9")),
+        Subsignal("n", Pins("A9"))
+    ),
+    ("pcie_rx", 1,
+        Subsignal("p", Pins("B13")),
+        Subsignal("n", Pins("AA3"))
     ),
 ]
 
@@ -86,6 +92,7 @@ class GTPTestSoC(SoCMini):
 
         # CRG --------------------------------------------------------------------------------------
         self.submodules.crg = _CRG(platform, sys_clk_freq)
+        platform.add_period_constraint(self.crg.cd_sys.clk, 1e9/100e6)
 
         # GTP RefClk -------------------------------------------------------------------------------
         if use_pcie_refclk:
@@ -108,41 +115,41 @@ class GTPTestSoC(SoCMini):
         print(qpll)
         self.submodules += qpll
 
-        # GTP --------------------------------------------------------------------------------------
-        tx_pads = platform.request(connector + "_tx")
-        rx_pads = platform.request(connector + "_rx")
-        gtp = GTP(qpll, tx_pads, rx_pads, sys_clk_freq,
-            data_width       = 20,
-            clock_aligner    = False,
-            tx_buffer_enable = True,
-            rx_buffer_enable = True)
-        self.submodules += gtp
-        if with_loopback:
-            self.comb += gtp.loopback.eq(0b010) # Near-End PMA Loopback
+        for i in range(2):
+            # GTP --------------------------------------------------------------------------------------
+            tx_pads = platform.request(connector + "_tx", i)
+            rx_pads = platform.request(connector + "_rx", i)
+            gtp = GTP(qpll, tx_pads, rx_pads, sys_clk_freq,
+                data_width       = 20,
+                clock_aligner    = False,
+                tx_buffer_enable = True,
+                rx_buffer_enable = True)
+            setattr(self.submodules, "gtp"+str(i), gtp)
+            if with_loopback:
+                self.comb += gtp.loopback.eq(0b010) # Near-End PMA Loopback
+            platform.add_period_constraint(gtp.cd_tx.clk, 1e9/gtp.tx_clk_freq)
+            platform.add_period_constraint(gtp.cd_rx.clk, 1e9/gtp.rx_clk_freq)
+            self.platform.add_false_path_constraints(
+                self.crg.cd_sys.clk,
+                gtp.cd_tx.clk,
+                gtp.cd_rx.clk)
 
-        platform.add_period_constraint(self.crg.cd_sys.clk, 1e9/100e6)
-        platform.add_period_constraint(gtp.cd_tx.clk, 1e9/gtp.tx_clk_freq)
-        platform.add_period_constraint(gtp.cd_rx.clk, 1e9/gtp.rx_clk_freq)
-        self.platform.add_false_path_constraints(
-            self.crg.cd_sys.clk,
-            gtp.cd_tx.clk,
-            gtp.cd_rx.clk)
+            # Test -------------------------------------------------------------------------------------
+            counter = Signal(32)
+            sync_tx = getattr(self.sync, "gtp{}_tx".format(i))
+            sync_tx += counter.eq(counter + 1)
 
-        # Test -------------------------------------------------------------------------------------
-        counter = Signal(32)
-        self.sync.tx += counter.eq(counter + 1)
+            # K28.5 and slow counter --> TX
+            self.comb += [
+                gtp.encoder.k[0].eq(1),
+                gtp.encoder.d[0].eq((5 << 5) | 28),
+                gtp.encoder.k[1].eq(0),
+                gtp.encoder.d[1].eq(counter[26:]),
+            ]
 
-        # K28.5 and slow counter --> TX
-        self.comb += [
-            gtp.encoder.k[0].eq(1),
-            gtp.encoder.d[0].eq((5 << 5) | 28),
-            gtp.encoder.k[1].eq(0),
-            gtp.encoder.d[1].eq(counter[26:]),
-        ]
-
-       # RX (slow counter) --> Leds
-        for i in range(4):
-            self.comb += platform.request("user_led", i).eq(gtp.decoders[1].d[i])
+           # RX (slow counter) --> Leds
+            for j in range(2):
+                self.comb += platform.request("user_led", 2*i+j).eq(gtp.decoders[1].d[i])
 
 # Load ---------------------------------------------------------------------------------------------
 
