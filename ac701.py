@@ -23,6 +23,8 @@ from liteeth.frontend.etherbone import LiteEthEtherbone
 
 from liteiclink.transceiver.gtp_7series import GTPQuadPLL, GTP
 
+from pcie_analyzer.record import Recorder
+
 # IOs ----------------------------------------------------------------------------------------------
 
 _io = [
@@ -194,7 +196,7 @@ class PCIeAnalyzer(SoCSDRAM):
             self.eth_phy.crg.cd_eth_rx.clk,
             self.eth_phy.crg.cd_eth_tx.clk)
 
-        # GTX RefClk -------------------------------------------------------------------------------
+        # GTP RefClk -------------------------------------------------------------------------------
         refclk      = Signal()
         refclk_freq = 100e6
         refclk_pads = platform.request("pcie_refclk")
@@ -218,6 +220,7 @@ class PCIeAnalyzer(SoCSDRAM):
                 clock_aligner    = False,
                 tx_buffer_enable = True,
                 rx_buffer_enable = True)
+            gtp.add_stream_endpoints()
             setattr(self.submodules, "gtp"+str(i), gtp)
             platform.add_period_constraint(gtp.cd_tx.clk, 1e9/gtp.tx_clk_freq)
             platform.add_period_constraint(gtp.cd_rx.clk, 1e9/gtp.rx_clk_freq)
@@ -225,6 +228,22 @@ class PCIeAnalyzer(SoCSDRAM):
                 self.crg.cd_sys.clk,
                 gtp.cd_tx.clk,
                 gtp.cd_rx.clk)
+
+        # Record -------------------------------------------------------------------------------------
+        self.submodules.gtp0_recorder = Recorder(
+            dram_port    = self.sdram.crossbar.get_port("write", 32),
+            clock_domain = "gtp0_rx")
+        self.add_csr("gtp0_recorder")
+        self.submodules.gtp1_recorder = Recorder(
+            dram_port    = self.sdram.crossbar.get_port("write", 32),
+            clock_domain = "gtp1_rx")
+        self.add_csr("gtp1_recorder")
+        self.comb += [
+            self.gtp0_recorder.sink.valid.eq(self.gtp0.source.valid),
+            self.gtp0_recorder.sink.data.eq(self.gtp0.source.payload.raw_bits()),
+            self.gtp1_recorder.sink.valid.eq(self.gtp1.source.valid),
+            self.gtp1_recorder.sink.data.eq(self.gtp1.source.payload.raw_bits()),
+        ]
 
 # Load ---------------------------------------------------------------------------------------------
 

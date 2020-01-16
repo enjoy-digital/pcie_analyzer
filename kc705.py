@@ -238,7 +238,6 @@ class PCIeAnalyzer(SoCSDRAM):
                 gtx.cd_tx.clk,
                 gtx.cd_rx.clk)
 
-
         # Record -------------------------------------------------------------------------------------
         self.submodules.gtx0_recorder = Recorder(
             dram_port    = self.sdram.crossbar.get_port("write", 32),
