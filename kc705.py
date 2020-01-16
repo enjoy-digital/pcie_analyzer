@@ -24,7 +24,7 @@ from liteeth.phy import LiteEthPHY
 from liteeth.core import LiteEthUDPIPCore
 from liteeth.frontend.etherbone import LiteEthEtherbone
 
-from liteiclink.transceiver.gtx_7series import GTXChannelPLL, GTX
+from liteiclink.transceiver.gtx_7series import GTXQuadPLL, GTX
 
 # IOs ----------------------------------------------------------------------------------------------
 
@@ -156,7 +156,7 @@ class _CRG(Module):
 class PCIeAnalyzer(SoCSDRAM):
     def __init__(self, platform, connector="pcie", linerate=2.5e9):
         assert connector in ["pcie"]
-        sys_clk_freq = int(150e6)
+        sys_clk_freq = int(125e6)
 
         # SoCSDRAM ----------------------------------------------------------------------------------
         SoCSDRAM.__init__(self, platform, sys_clk_freq,
@@ -217,7 +217,7 @@ class PCIeAnalyzer(SoCSDRAM):
             o_O     = refclk)
 
         # GTX PLL ----------------------------------------------------------------------------------
-        qpll = GTXChannelPLL(refclk, refclk_freq, linerate)
+        qpll = GTXQuadPLL(refclk, refclk_freq, linerate)
         print(qpll)
         self.submodules += qpll
 
@@ -312,7 +312,7 @@ def main():
         load()
     platform = Platform()
     soc     = PCIeAnalyzer(platform)
-    builder = Builder(soc, output_dir="build")
+    builder = Builder(soc, output_dir="build", csr_csv="tools/csr.csv")
     builder.build(build_name="kc705")
 
 if __name__ == "__main__":
