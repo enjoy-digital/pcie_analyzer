@@ -23,6 +23,8 @@ from liteeth.phy.model import LiteEthPHYModel
 from liteeth.core import LiteEthUDPIPCore
 from liteeth.frontend.etherbone import LiteEthEtherbone
 
+from pcie_analyzer.record import Recorder
+
 # IOs ----------------------------------------------------------------------------------------------
 
 _io = [
@@ -102,9 +104,27 @@ class PCIeAnalyzer(SoCSDRAM):
             ip_address  = "192.168.1.50",
             clk_freq    = sys_clk_freq)
         self.submodules.ethcore = ethcore
-        # rtherbone
+        # etherbone
         self.submodules.etherbone = LiteEthEtherbone(self.ethcore.udp, 1234, mode="master")
         self.add_wb_master(self.etherbone.wishbone.bus)
+
+        # Record -------------------------------------------------------------------------------------
+        self.submodules.rx_recorder = Recorder(
+            dram_port    = self.sdram.crossbar.get_port("write", 32),
+            clock_domain = "sys")
+        self.add_csr("rx_recorder")
+        self.submodules.tx_recorder = Recorder(
+            dram_port    = self.sdram.crossbar.get_port("write", 32),
+            clock_domain = "sys")
+        self.add_csr("tx_recorder")
+        counter = Signal(32)
+        self.sync += counter.eq(counter + 1)
+        self.comb += [
+            self.rx_recorder.sink.valid.eq(1),
+            self.rx_recorder.sink.data.eq(counter),
+            self.tx_recorder.sink.valid.eq(1),
+            self.tx_recorder.sink.data.eq(counter),
+        ]
 
 # Build --------------------------------------------------------------------------------------------
 
