@@ -18,12 +18,11 @@ from litex.soc.cores import uart
 from litedram.common import PhySettings
 from litedram.modules import MT48LC16M16
 from litedram.phy.model import SDRAMPHYModel
+from litedram.frontend.dma import LiteDRAMDMAWriter
 
 from liteeth.phy.model import LiteEthPHYModel
 from liteeth.core import LiteEthUDPIPCore
 from liteeth.frontend.etherbone import LiteEthEtherbone
-
-from pcie_analyzer.record import Recorder
 
 # IOs ----------------------------------------------------------------------------------------------
 
@@ -62,7 +61,7 @@ class PCIeAnalyzer(SoCSDRAM):
         SoCSDRAM.__init__(self, platform, sys_clk_freq,
             integrated_rom_size  = 0x8000,
             integrated_sram_size = 0x1000,
-            uart_name            = "crossover",
+            uart_name            = "stub", # crossover
             csr_data_width       = 32,
             **kwargs
         )
@@ -108,22 +107,20 @@ class PCIeAnalyzer(SoCSDRAM):
         self.submodules.etherbone = LiteEthEtherbone(self.ethcore.udp, 1234, mode="master")
         self.add_wb_master(self.etherbone.wishbone.bus)
 
-        # Record -------------------------------------------------------------------------------------
-        self.submodules.rx_recorder = Recorder(
-            dram_port    = self.sdram.crossbar.get_port("write", 32),
-            clock_domain = "sys")
-        self.add_csr("rx_recorder")
-        self.submodules.tx_recorder = Recorder(
-            dram_port    = self.sdram.crossbar.get_port("write", 32),
-            clock_domain = "sys")
-        self.add_csr("tx_recorder")
+        # Record -----------------------------------------------------------------------------------
+        self.submodules.rx_dma_recorder = LiteDRAMDMAWriter(self.sdram.crossbar.get_port("write", 32))
+        self.rx_dma_recorder.add_csr()
+        self.add_csr("rx_dma_recorder")
+        self.submodules.tx_dma_recorder = LiteDRAMDMAWriter(self.sdram.crossbar.get_port("write", 32))
+        self.tx_dma_recorder.add_csr()
+        self.add_csr("tx_dma_recorder")
         counter = Signal(32)
         self.sync += counter.eq(counter + 1)
         self.comb += [
-            self.rx_recorder.sink.valid.eq(1),
-            self.rx_recorder.sink.data.eq(counter),
-            self.tx_recorder.sink.valid.eq(1),
-            self.tx_recorder.sink.data.eq(counter),
+            self.rx_dma_recorder.sink.valid.eq(1),
+            self.rx_dma_recorder.sink.data.eq(counter),
+            self.tx_dma_recorder.sink.valid.eq(1),
+            self.tx_dma_recorder.sink.data.eq(counter),
         ]
 
 # Build --------------------------------------------------------------------------------------------

@@ -9,7 +9,7 @@ wb.open()
 
 # # #
 
-class StreamRecorder:
+class DMARecorder:
     def __init__(self, name):
         self._start  = getattr(wb.regs, name + "_start")
         self._done   = getattr(wb.regs, name + "_done")
@@ -33,16 +33,15 @@ class StreamRecorder:
             datas.append(wb.read(base + 4*i))
         return datas
 
-
-tx_recorder = StreamRecorder("tx_recorder")
-tx_recorder.capture(wb.mems.main_ram.base, 128)
-datas = tx_recorder.upload(wb.mems.main_ram.base, 128)
+rx_recorder = DMARecorder("rx_dma_recorder")
+rx_recorder.capture(0x0000, 16)
+datas = rx_recorder.upload(wb.mems.main_ram.base, 16)
 for data in datas:
     print("{:08x}".format(data))
 
-rx_recorder = StreamRecorder("rx_recorder")
-rx_recorder.capture(wb.mems.main_ram.base, 128)
-datas = rx_recorder.upload(wb.mems.main_ram.base, 128)
+tx_recorder = DMARecorder("tx_dma_recorder")
+tx_recorder.capture(0x0000, 16)
+datas = tx_recorder.upload(wb.mems.main_ram.base, 16)
 for data in datas:
     print("{:08x}".format(data))
 
