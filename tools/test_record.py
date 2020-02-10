@@ -34,14 +34,14 @@ class DMARecorder:
         return datas
 
 rx_recorder = DMARecorder("rx_dma_recorder")
-rx_recorder.capture(0x0000, 16)
-datas = rx_recorder.upload(wb.mems.main_ram.base, 16)
+rx_recorder.capture(0x0000, 32)
+datas = rx_recorder.upload(wb.mems.main_ram.base, 32)
 for data in datas:
     print("{:08x}".format(data))
 
 tx_recorder = DMARecorder("tx_dma_recorder")
-tx_recorder.capture(0x0000, 16)
-datas = tx_recorder.upload(wb.mems.main_ram.base, 16)
+tx_recorder.capture(0x0000, 32)
+datas = tx_recorder.upload(wb.mems.main_ram.base, 32)
 for data in datas:
     print("{:08x}".format(data))
 

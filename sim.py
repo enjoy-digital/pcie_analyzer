@@ -61,7 +61,8 @@ class PCIeAnalyzer(SoCSDRAM):
         SoCSDRAM.__init__(self, platform, sys_clk_freq,
             integrated_rom_size  = 0x8000,
             integrated_sram_size = 0x1000,
-            uart_name            = "stub", # crossover
+            uart_name            = "crossover",
+            l2_size              = 0,
             csr_data_width       = 32,
             **kwargs
         )
@@ -70,7 +71,7 @@ class PCIeAnalyzer(SoCSDRAM):
         self.submodules.crg = CRG(platform.request("sys_clk"))
 
         # SDR SDRAM --------------------------------------------------------------------------------
-        sdram_module =  MT48LC16M16(100e6, "1:1") # use 100MHz timings
+        sdram_module = MT48LC16M16(100e6, "1:1") # use 100MHz timings
         phy_settings = PhySettings(
             memtype       = "SDR",
             databits      = 32,
@@ -89,9 +90,10 @@ class PCIeAnalyzer(SoCSDRAM):
             self.sdrphy,
             sdram_module.geom_settings,
             sdram_module.timing_settings)
-        # Reduce memtest size for simulation speedup
-        self.add_constant("MEMTEST_DATA_SIZE", 8*1024)
-        self.add_constant("MEMTEST_ADDR_SIZE", 8*1024)
+        # Disable Memtest for simulation speedup
+        self.add_constant("MEMTEST_BUS_SIZE",  0)
+        self.add_constant("MEMTEST_ADDR_SIZE", 0)
+        self.add_constant("MEMTEST_DATA_SIZE", 0)
 
         # Ethernet ---------------------------------------------------------------------------------
         # phy
@@ -129,12 +131,12 @@ def main():
     parser = argparse.ArgumentParser(description="PCIeAnalyzer LiteX SoC Simulation")
     builder_args(parser)
     soc_sdram_args(parser)
-    parser.add_argument("--threads",        default=1,           help="Set number of threads (default=1)")
-    parser.add_argument("--rom-init",       default=None,        help="rom_init file")
-    parser.add_argument("--trace",          action="store_true", help="Enable VCD tracing")
-    parser.add_argument("--trace-start",    default=0,           help="Cycle to start VCD tracing")
-    parser.add_argument("--trace-end",      default=-1,          help="Cycle to end VCD tracing")
-    parser.add_argument("--opt-level",      default="O0",        help="Compilation optimization level")
+    parser.add_argument("--threads",     default=1,           help="Set number of threads (default=1)")
+    parser.add_argument("--rom-init",    default=None,        help="rom_init file")
+    parser.add_argument("--trace",       action="store_true", help="Enable VCD tracing")
+    parser.add_argument("--trace-start", default=0,           help="Cycle to start VCD tracing")
+    parser.add_argument("--trace-end",   default=-1,          help="Cycle to end VCD tracing")
+    parser.add_argument("--opt-level",   default="O0",        help="Compilation optimization level")
     args = parser.parse_args()
 
     soc_kwargs     = {}
