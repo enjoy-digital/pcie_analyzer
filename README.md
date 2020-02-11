@@ -12,6 +12,8 @@
 
 # PCIe analyzer experiments
 
+![PCIe Analyzer](doc/banner.jpg)
+
 The aim of this project is to create a PCIe interposer + FPGA capture board for PCIe signals capture and analysis.
 
 ## Prerequisites
@@ -25,5 +27,5 @@ $ sudo ./litex_setup.py init install
 ```
 ## Building design
 ```sh
-$ ./target.py (can be ac701, kc705)
+$ ./target.py (can be ac701, kc705, netv2)
 ```
