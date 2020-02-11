@@ -176,7 +176,9 @@ class PCIeAnalyzer(SoCSDRAM):
         # phy
         self.submodules.eth_phy = LiteEthPHYRGMII(
             clock_pads = platform.request("eth_clocks"),
-            pads       = platform.request("eth"))
+            pads       = platform.request("eth"),
+            tx_delay   = 0e-9,
+            rx_delay   = 0e-9)
         self.add_csr("eth_phy")
         # core
         self.submodules.eth_core = LiteEthUDPIPCore(
