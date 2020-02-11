@@ -25,6 +25,11 @@ class BIST:
         time.sleep(1)
         return self._rx_errors.read()
 
+print("GTP0 TX Clk: {:d}".format(wb.regs.gtp0_tx_freq_value.read()))
+print("GTP0 RX Clk: {:d}".format(wb.regs.gtp0_rx_freq_value.read()))
+print("GTP0 TX Clk: {:d}".format(wb.regs.gtp1_tx_freq_value.read()))
+print("GTP0 RX Clk: {:d}".format(wb.regs.gtp1_rx_freq_value.read()))
+
 print("Running GTP0 BIST...")
 gtp0_bist = BIST("gtp0_tx_bist", "gtp0_rx_bist")
 errors = gtp0_bist.run()

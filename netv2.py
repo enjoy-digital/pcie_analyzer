@@ -18,6 +18,7 @@ from litex.soc.interconnect import stream
 from litex.soc.cores.clock import *
 from litex.soc.integration.soc_sdram import *
 from litex.soc.integration.builder import *
+from litex.soc.cores.freqmeter import FreqMeter
 
 from litedram.modules import K4B2G1646F
 from litedram.phy import s7ddrphy
@@ -90,12 +91,13 @@ class _CRG(Module):
 
 class PCIeAnalyzer(SoCSDRAM):
     def __init__(self, platform,
-        with_cpu        = True,
-        with_sdram      = True,
-        with_etherbone  = True,
-        with_gtp        = True, gtp_connector="pcie", gtp_linerate=5e9,
-        with_gtp_bist   = True,
-        with_record     = True):
+        with_cpu           = True,
+        with_sdram         = True,
+        with_etherbone     = True,
+        with_gtp           = True, gtp_connector="pcie", gtp_refclk="pcie", gtp_linerate=5e9,
+        with_gtp_bist      = True,
+        with_gtp_freqmeter = True,
+        with_record        = True):
         sys_clk_freq = int(100e6)
 
         # SoCSDRAM ---------------------------------------------------------------------------------
@@ -150,14 +152,21 @@ class PCIeAnalyzer(SoCSDRAM):
 
         # GTP RefClk -------------------------------------------------------------------------------
         if with_gtp:
-            refclk      = Signal()
-            refclk_freq = 100e6
-            refclk_pads = platform.request("pcie_refclk")
-            self.specials += Instance("IBUFDS_GTE2",
-                i_CEB   = 0,
-                i_I     = refclk_pads.p,
-                i_IB    = refclk_pads.n,
-                o_O     = refclk)
+            assert gtp_refclk in ["pcie", "internal"]
+            if gtp_refclk == "pcie":
+                refclk      = Signal()
+                refclk_freq = 100e6
+                refclk_pads = platform.request("pcie_refclk")
+                self.specials += Instance("IBUFDS_GTE2",
+                    i_CEB   = 0,
+                    i_I     = refclk_pads.p,
+                    i_IB    = refclk_pads.n,
+                    o_O     = refclk)
+            else:
+                refclk      = Signal()
+                refclk_freq = 100e6
+                self.comb += refclk.eq(ClockSignal("clk100"))
+                platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-49]")
 
         # GTP PLL ----------------------------------------------------------------------------------
         if with_gtp:
@@ -183,7 +192,19 @@ class PCIeAnalyzer(SoCSDRAM):
                     self.crg.cd_sys.clk,
                     gtp.cd_tx.clk,
                     gtp.cd_rx.clk)
-         # GTPs BIST -------------------------------------------------------------------------------
+
+        # GTPs FreqMeters --------------------------------------------------------------------------
+        if with_gtp_freqmeter:
+            self.submodules.gtp0_tx_freq = FreqMeter(ClockSignal("gtp0_tx"))
+            self.submodules.gtp0_rx_freq = FreqMeter(ClockSignal("gtp0_rx"))
+            self.submodules.gtp1_tx_freq = FreqMeter(ClockSignal("gtp1_tx"))
+            self.submodules.gtp1_rx_freq = FreqMeter(ClockSignal("gtp1_rx"))
+            self.add_csr("gtp0_tx_freq")
+            self.add_csr("gtp0_rx_freq")
+            self.add_csr("gtp1_tx_freq")
+            self.add_csr("gtp1_rx_freq")
+
+        # GTPs BIST --------------------------------------------------------------------------------
         if with_gtp_bist:
             self.submodules.gtp0_tx_bist = GTPTXBIST(self.gtp0, "gtp0_tx")
             self.submodules.gtp0_rx_bist = GTPRXBIST(self.gtp0, "gtp0_rx")
@@ -196,7 +217,7 @@ class PCIeAnalyzer(SoCSDRAM):
 
         # Record -----------------------------------------------------------------------------------
         # FIXME: use better data/ctrl packing (or separate recorders)
-        if with_gtp and with_record:
+        if with_record:
             # Convert RX stream from 16-bit@250MHz to 64-bit@sys_clk
             rx_converter = stream.StrideConverter(
                 [("data", 16), ("ctrl",  2)],
