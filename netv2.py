@@ -10,19 +10,54 @@ from migen import *
 
 from litex.build import tools
 
+from litex.build.generic_platform import *
 from litex.boards.platforms import netv2
 
 from litex.soc.interconnect.csr import *
+from litex.soc.interconnect import stream
 from litex.soc.cores.clock import *
 from litex.soc.integration.soc_sdram import *
 from litex.soc.integration.builder import *
 
 from litedram.modules import K4B2G1646F
 from litedram.phy import s7ddrphy
+from litedram.frontend.dma import LiteDRAMDMAWriter
 
 from liteeth.phy.rmii import LiteEthPHYRMII
 from liteeth.core import LiteEthUDPIPCore
 from liteeth.frontend.etherbone import LiteEthEtherbone
+
+from liteiclink.transceiver.gtp_7series import GTPQuadPLL, GTP
+
+from pcie_analyzer.bist import GTPTXBIST, GTPRXBIST
+
+# IOs ----------------------------------------------------------------------------------------------
+
+_pcie_analyzer_io = [
+
+    ("pcie_refclk", 0,
+        Subsignal("p", Pins("F10")),
+        Subsignal("n", Pins("E10"))
+    ),
+
+    ("pcie_tx", 0,
+        Subsignal("p", Pins("D5")),
+        Subsignal("n", Pins("C5"))
+    ),
+    ("pcie_rx", 0,
+        Subsignal("p", Pins("D11")),
+        Subsignal("n", Pins("C11"))
+    ),
+
+    ("pcie_tx", 1,
+        Subsignal("p", Pins("B6")),
+        Subsignal("n", Pins("A6"))
+    ),
+    ("pcie_rx", 1,
+        Subsignal("p", Pins("B10")),
+        Subsignal("n", Pins("A10"))
+    ),
+]
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -57,7 +92,10 @@ class PCIeAnalyzer(SoCSDRAM):
     def __init__(self, platform,
         with_cpu        = True,
         with_sdram      = True,
-        with_etherbone  = True):
+        with_etherbone  = True,
+        with_gtp        = True, gtp_connector="pcie", gtp_linerate=5e9,
+        with_gtp_bist   = True,
+        with_record     = True):
         sys_clk_freq = int(100e6)
 
         # SoCSDRAM ---------------------------------------------------------------------------------
@@ -110,6 +148,77 @@ class PCIeAnalyzer(SoCSDRAM):
                 self.ethphy.crg.cd_eth_rx.clk,
                 self.ethphy.crg.cd_eth_tx.clk)
 
+        # GTP RefClk -------------------------------------------------------------------------------
+        if with_gtp:
+            refclk      = Signal()
+            refclk_freq = 100e6
+            refclk_pads = platform.request("pcie_refclk")
+            self.specials += Instance("IBUFDS_GTE2",
+                i_CEB   = 0,
+                i_I     = refclk_pads.p,
+                i_IB    = refclk_pads.n,
+                o_O     = refclk)
+
+        # GTP PLL ----------------------------------------------------------------------------------
+        if with_gtp:
+            qpll = GTPQuadPLL(refclk, refclk_freq, gtp_linerate)
+            print(qpll)
+            self.submodules += qpll
+
+        # GTPs -------------------------------------------------------------------------------------
+        if with_gtp:
+            for i in range(2):
+                tx_pads = platform.request(gtp_connector + "_tx", i)
+                rx_pads = platform.request(gtp_connector + "_rx", i)
+                gtp = GTP(qpll, tx_pads, rx_pads, sys_clk_freq,
+                    data_width       = 20,
+                    clock_aligner    = False,
+                    tx_buffer_enable = True,
+                    rx_buffer_enable = True)
+                gtp.add_stream_endpoints()
+                setattr(self.submodules, "gtp"+str(i), gtp)
+                platform.add_period_constraint(gtp.cd_tx.clk, 1e9/gtp.tx_clk_freq)
+                platform.add_period_constraint(gtp.cd_rx.clk, 1e9/gtp.rx_clk_freq)
+                self.platform.add_false_path_constraints(
+                    self.crg.cd_sys.clk,
+                    gtp.cd_tx.clk,
+                    gtp.cd_rx.clk)
+         # GTPs BIST -------------------------------------------------------------------------------
+        if with_gtp_bist:
+            self.submodules.gtp0_tx_bist = GTPTXBIST(self.gtp0, "gtp0_tx")
+            self.submodules.gtp0_rx_bist = GTPRXBIST(self.gtp0, "gtp0_rx")
+            self.submodules.gtp1_tx_bist = GTPTXBIST(self.gtp1, "gtp1_tx")
+            self.submodules.gtp1_rx_bist = GTPRXBIST(self.gtp1, "gtp1_rx")
+            self.add_csr("gtp0_tx_bist")
+            self.add_csr("gtp0_rx_bist")
+            self.add_csr("gtp1_tx_bist")
+            self.add_csr("gtp1_rx_bist")
+
+        # Record -----------------------------------------------------------------------------------
+        # FIXME: use better data/ctrl packing (or separate recorders)
+        if with_gtp and with_record:
+            # Convert RX stream from 16-bit@250MHz to 64-bit@sys_clk
+            rx_converter = stream.StrideConverter(
+                [("data", 16), ("ctrl",  2)],
+                [("data", 96), ("ctrl", 12)],
+                reverse     = False)
+            rx_converter = ClockDomainsRenamer("gtp0_rx")(rx_converter)
+            self.submodules.rx_converter = rx_converter
+            rx_cdc = stream.AsyncFIFO([("data", 96), ("ctrl", 12)], 8, buffered=True)
+            rx_cdc = ClockDomainsRenamer({"write": "gtp0_rx", "read": "sys"})(rx_cdc)
+            self.submodules.rx_cdc = rx_cdc
+            # RX DMA Recorder
+            self.submodules.rx_dma_recorder = LiteDRAMDMAWriter(self.sdram.crossbar.get_port("write", 128))
+            self.rx_dma_recorder.add_csr()
+            self.add_csr("rx_dma_recorder")
+            self.comb += [
+                gtp.source.connect(rx_converter.sink),
+                rx_converter.source.connect(rx_cdc.sink),
+                self.rx_dma_recorder.sink.valid.eq(rx_cdc.source.valid),
+                self.rx_dma_recorder.sink.data[0:96].eq(rx_cdc.source.data),
+                self.rx_dma_recorder.sink.data[96:108].eq(rx_cdc.source.ctrl),
+            ]
+
 # Build --------------------------------------------------------------------------------------------
 
 def main():
@@ -135,8 +244,9 @@ def main():
         exit()
 
     platform = netv2.Platform()
+    platform.add_extension(_pcie_analyzer_io)
     soc      = PCIeAnalyzer(platform)
-    builder  = Builder(soc, output_dir="build", csr_csv="test/csr.csv")
+    builder  = Builder(soc, output_dir="build", csr_csv="tools/csr.csv")
     builder.build(run=args.build)
 
 if __name__ == "__main__":
