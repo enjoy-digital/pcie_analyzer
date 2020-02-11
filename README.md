@@ -29,3 +29,6 @@ $ sudo ./litex_setup.py init install
 ```sh
 $ ./target.py (can be ac701, netv2)
 ```
+
+## PCIe interposer and receiver Hardware
+The PCIe interposer and receiver boards have been designed by Franck Jullien and are still in prototype stage. More information on the hardware and availability will be added soon.
