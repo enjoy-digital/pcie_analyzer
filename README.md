@@ -27,5 +27,5 @@ $ sudo ./litex_setup.py init install
 ```
 ## Building design
 ```sh
-$ ./target.py (can be ac701, kc705, netv2)
+$ ./target.py (can be ac701, netv2)
 ```
