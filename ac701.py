@@ -161,6 +161,7 @@ class PCIeAnalyzer(SoCSDRAM):
             integrated_rom_size  = 0x8000,
             integrated_sram_size = 0x1000,
             uart_name            = "serial",
+            l2_size              = 0,
             csr_data_width       = 32,
         )
 
