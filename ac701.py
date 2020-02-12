@@ -16,14 +16,13 @@ from litex.soc.integration.builder import *
 
 from litedram.modules import MT8JTF12864
 from litedram.phy import s7ddrphy
+from litedram.frontend.dma import LiteDRAMDMAWriter
 
 from liteeth.phy.s7rgmii import LiteEthPHYRGMII
 from liteeth.core import LiteEthUDPIPCore
 from liteeth.frontend.etherbone import LiteEthEtherbone
 
 from liteiclink.transceiver.gtp_7series import GTPQuadPLL, GTP
-
-from pcie_analyzer.record import Recorder
 
 # IOs ----------------------------------------------------------------------------------------------
 
@@ -232,19 +231,21 @@ class PCIeAnalyzer(SoCSDRAM):
                 gtp.cd_rx.clk)
 
         # Record -------------------------------------------------------------------------------------
-        self.submodules.gtp0_recorder = Recorder(
-            dram_port    = self.sdram.crossbar.get_port("write", 32),
-            clock_domain = "gtp0_rx")
-        self.add_csr("gtp0_recorder")
-        self.submodules.gtp1_recorder = Recorder(
-            dram_port    = self.sdram.crossbar.get_port("write", 32),
-            clock_domain = "gtp1_rx")
-        self.add_csr("gtp1_recorder")
+        self.submodules.rx_dma_recorder = LiteDRAMDMAWriter(
+            self.sdram.crossbar.get_port("write", 32, clock_domain = "gtp0_rx"))
+        self.rx_dma_recorder.add_csr()
+        self.add_csr("rx_dma_recorder")
+
+        self.submodules.tx_dma_recorder = LiteDRAMDMAWriter(
+            self.sdram.crossbar.get_port("write", 32, clock_domain = "gtp1_rx"))
+        self.tx_dma_recorder.add_csr()
+        self.add_csr("tx_dma_recorder")
+
         self.comb += [
-            self.gtp0_recorder.sink.valid.eq(self.gtp0.source.valid),
-            self.gtp0_recorder.sink.data.eq(self.gtp0.source.payload.raw_bits()),
-            self.gtp1_recorder.sink.valid.eq(self.gtp1.source.valid),
-            self.gtp1_recorder.sink.data.eq(self.gtp1.source.payload.raw_bits()),
+            self.rx_dma_recorder.sink.valid.eq(self.gtp0.source.valid),
+            self.rx_dma_recorder.sink.data.eq(self.gtp0.source.payload.raw_bits()),
+            self.tx_dma_recorder.sink.valid.eq(self.gtp1.source.valid),
+            self.tx_dma_recorder.sink.data.eq(self.gtp1.source.payload.raw_bits()),
         ]
 
 # Load ---------------------------------------------------------------------------------------------
