@@ -78,6 +78,14 @@ _io = [
         IOStandard("LVCMOS18"), Misc("SLEW=FAST"), Drive(16)
     ),
 
+    ("serial", 0,
+        Subsignal("cts", Pins("V19")),
+        Subsignal("rts", Pins("W19")),
+        Subsignal("tx", Pins("U19")),
+        Subsignal("rx", Pins("T19")),
+        IOStandard("LVCMOS18")
+    ),
+
     ("ddram", 0,
         Subsignal("a", Pins(
             "M4 J3 J1 L4 K5 M7 K1 M6",
@@ -152,7 +160,7 @@ class PCIeAnalyzer(SoCSDRAM):
         SoCSDRAM.__init__(self, platform, sys_clk_freq,
             integrated_rom_size  = 0x8000,
             integrated_sram_size = 0x1000,
-            uart_name            = "crossover",
+            uart_name            = "serial",
             csr_data_width       = 32,
         )
 
