@@ -96,7 +96,7 @@ _io = [
             "AC2 AB2 AF2 AE2 Y1 Y2 AC1 AB1",
             "Y3 W3 W6 V6 W4 W5 W1 V1"),
             IOStandard("SSTL15"),
-            Misc("IN_TERM=UNTUNED_SPLIT_50")),
+            Misc("IN_TERM=UNTUNED_SPLIT_40")),
         Subsignal("dqs_p", Pins("V8 AD5 AD1 V3"),
             IOStandard("DIFF_SSTL15")),
         Subsignal("dqs_n", Pins("W8 AE5 AE1 V2"),
