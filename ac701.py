@@ -154,7 +154,7 @@ class _CRG(Module):
 class PCIeAnalyzer(SoCSDRAM):
     def __init__(self, platform, connector="pcie", linerate=2.5e9):
         assert connector in ["pcie"]
-        sys_clk_freq = int(125e6)
+        sys_clk_freq = int(50e6)
 
         # SoCSDRAM ----------------------------------------------------------------------------------
         SoCSDRAM.__init__(self, platform, sys_clk_freq,
@@ -182,20 +182,31 @@ class PCIeAnalyzer(SoCSDRAM):
 
         # Ethernet ---------------------------------------------------------------------------------
         # phy
-        self.submodules.eth_phy = LiteEthPHYRGMII(
-            clock_pads = platform.request("eth_clocks"),
-            pads       = platform.request("eth"),
-            tx_delay   = 0e-9,
-            rx_delay   = 0e-9)
+        eth_phy = LiteEthPHYRGMII(
+            clock_pads         = platform.request("eth_clocks"),
+            pads               = platform.request("eth"),
+            with_hw_init_reset = False,
+            tx_delay           = 0e-9,
+            rx_delay           = 0e-9)
+        self.submodules.eth_phy = ClockDomainsRenamer("eth_tx")(eth_phy)
         self.add_csr("eth_phy")
+
         # core
-        self.submodules.eth_core = LiteEthUDPIPCore(
+        eth_core = LiteEthUDPIPCore(
             phy         = self.eth_phy,
             mac_address = 0x10e2d5000000,
-            ip_address  = "192.168.1.50",
-            clk_freq    = sys_clk_freq)
-        # etherbone
-        self.submodules.etherbone = LiteEthEtherbone(self.eth_core.udp, 1234)
+            ip_address  = "172.30.28.201",
+            clk_freq    = 125000000)
+        self.submodules.eth_core = ClockDomainsRenamer("eth_tx")(eth_core)
+
+        # etherbone bridge
+        etherbone_cd = ClockDomain("etherbone") # similar to sys but need for correct
+        self.clock_domains += etherbone_cd      # clock domain renaming
+        self.comb += [
+            etherbone_cd.clk.eq(ClockSignal("sys")),
+            etherbone_cd.rst.eq(ResetSignal("sys"))
+        ]
+        self.submodules.etherbone = LiteEthEtherbone(self.eth_core.udp, 1234, cd="etherbone")
         self.add_wb_master(self.etherbone.wishbone.bus)
 
         # timing constraints
