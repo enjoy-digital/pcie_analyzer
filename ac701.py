@@ -13,6 +13,7 @@ from litex.build.xilinx import XilinxPlatform
 from litex.soc.cores.clock import *
 from litex.soc.integration.soc_sdram import *
 from litex.soc.integration.builder import *
+from litex.soc.interconnect import stream
 
 from litedram.modules import MT8JTF12864
 from litedram.phy import s7ddrphy
@@ -23,6 +24,9 @@ from liteeth.core import LiteEthUDPIPCore
 from liteeth.frontend.etherbone import LiteEthEtherbone
 
 from liteiclink.transceiver.gtp_7series import GTPQuadPLL, GTP
+
+from pcie_analyzer.descrambler import Descrambler, descrambler_layout
+from pcie_analyzer.detect_ordered_sets import DetectOrderedSets
 
 # IOs ----------------------------------------------------------------------------------------------
 
@@ -250,23 +254,64 @@ class PCIeAnalyzer(SoCSDRAM):
                 gtp.cd_tx.clk,
                 gtp.cd_rx.clk)
 
+        # Detect ordered sets / Descramble -----------------------------------------------------------
+        self.submodules.rx_detector   = ClockDomainsRenamer("gtp0_rx")(DetectOrderedSets())
+        self.submodules.rx_desrambler = ClockDomainsRenamer("gtp0_rx")(Descrambler())
+        self.comb += self.rx_detector.sink.connect(self.gtp0.source)
+        self.comb += self.rx_desrambler.sink.connect(self.rx_detector.source)
+
+        self.submodules.tx_detector   = ClockDomainsRenamer("gtp1_rx")(DetectOrderedSets())
+        self.submodules.tx_desrambler = ClockDomainsRenamer("gtp1_rx")(Descrambler())
+        self.comb += self.tx_detector.sink.connect(self.gtp1.source)
+        self.comb += self.tx_desrambler.sink.connect(self.tx_detector.source)
+
         # Record -------------------------------------------------------------------------------------
         self.submodules.rx_dma_recorder = LiteDRAMDMAWriter(
-            self.sdram.crossbar.get_port("write", 32, clock_domain = "gtp0_rx"))
+            self.sdram.crossbar.get_port("write", 1024, clock_domain = "gtp0_rx"))
         self.rx_dma_recorder.add_csr()
         self.add_csr("rx_dma_recorder")
 
         self.submodules.tx_dma_recorder = LiteDRAMDMAWriter(
-            self.sdram.crossbar.get_port("write", 32, clock_domain = "gtp1_rx"))
+            self.sdram.crossbar.get_port("write", 1024, clock_domain = "gtp1_rx"))
         self.tx_dma_recorder.add_csr()
         self.add_csr("tx_dma_recorder")
 
         self.comb += [
-            self.rx_dma_recorder.sink.valid.eq(self.gtp0.source.valid),
-            self.rx_dma_recorder.sink.data.eq(self.gtp0.source.payload.raw_bits()),
-            self.tx_dma_recorder.sink.valid.eq(self.gtp1.source.valid),
-            self.tx_dma_recorder.sink.data.eq(self.gtp1.source.payload.raw_bits()),
+
+            self.rx_desrambler.source.ready.eq(1),
+
+            self.rx_dma_recorder.sink.valid.eq(self.rx_desrambler.source.valid),
+            self.rx_dma_recorder.sink.data.eq(self.rx_desrambler.source.payload.raw_bits()),
+    
+            self.tx_desrambler.source.ready.eq(self.tx_dma_recorder._done.status),
+    
+            self.tx_dma_recorder.sink.valid.eq(self.tx_desrambler.source.valid),
+            self.tx_dma_recorder.sink.data.eq(self.tx_desrambler.source.payload.raw_bits()),
         ]
+
+        from litescope import LiteScopeAnalyzer
+        analyzer_signals = [
+            self.rx_desrambler.source.data,
+            self.rx_desrambler.source.ctrl,
+            self.rx_detector.word0,
+            self.rx_detector.word1,
+            self.rx_detector.word2,
+            self.rx_detector.word3,
+            self.rx_detector.word4,
+            self.rx_detector.word5,
+            self.rx_detector.word6,
+            self.rx_detector.word7,
+            self.rx_detector.word8,
+            self.rx_detector.word9,
+            self.rx_detector.source.type,
+            self.rx_detector.source.ctrl,
+            self.rx_detector.source.data,
+            self.gtp0.source.data,
+            self.gtp0.source.ctrl
+        ]
+
+        self.submodules.analyzer = ClockDomainsRenamer("gtp0_rx")(LiteScopeAnalyzer(analyzer_signals, 4096, csr_csv="tools/analyzer.csv"))
+        self.add_csr("analyzer")
 
 # Load ---------------------------------------------------------------------------------------------
 
