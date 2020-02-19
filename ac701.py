@@ -25,10 +25,13 @@ from liteeth.frontend.etherbone import LiteEthEtherbone
 
 from liteiclink.transceiver.gtp_7series import GTPQuadPLL, GTP
 
-from pcie_analyzer.descrambler import Descrambler, descrambler_layout
-from pcie_analyzer.detect_ordered_sets import DetectOrderedSets
+from pcie_analyzer.descrambler import Descrambler, DetectOrderedSets
 
-# IOs ----------------------------------------------------------------------------------------------
+# *********************************************************
+# *                                                       *
+# *                      IOs                              *
+# *                                                       *
+# *********************************************************
 
 _io = [
     ("clk200", 0,
@@ -122,13 +125,21 @@ _io = [
     ),
 ]
 
-# Platform -----------------------------------------------------------------------------------------
+# *********************************************************
+# *                                                       *
+# *                      Platform                         *
+# *                                                       *
+# *********************************************************
 
 class Platform(XilinxPlatform):
     def __init__(self):
         XilinxPlatform.__init__(self, "xc7a200t-fbg676-2", _io, toolchain="vivado")
 
-# CRG ----------------------------------------------------------------------------------------------
+# *********************************************************
+# *                                                       *
+# *                      CRG                              *
+# *                                                       *
+# *********************************************************
 
 class _CRG(Module):
     def __init__(self, platform, sys_clk_freq):
@@ -153,14 +164,20 @@ class _CRG(Module):
 
         self.submodules.idelayctrl = S7IDELAYCTRL(self.cd_clk200)
 
-# PCIe Analyzer ------------------------------------------------------------------------------------
+# *********************************************************
+# *                                                       *
+# *                      Analyzer                         *
+# *                                                       *
+# *********************************************************
 
 class PCIeAnalyzer(SoCSDRAM):
     def __init__(self, platform, connector="pcie", linerate=2.5e9):
         assert connector in ["pcie"]
         sys_clk_freq = int(50e6)
 
-        # SoCSDRAM ----------------------------------------------------------------------------------
+        # *********************************************************
+        # *                      SoC SDRAM                        *
+        # *********************************************************
         SoCSDRAM.__init__(self, platform, sys_clk_freq,
             integrated_rom_size  = 0x8000,
             integrated_sram_size = 0x1000,
@@ -169,11 +186,15 @@ class PCIeAnalyzer(SoCSDRAM):
             csr_data_width       = 32,
         )
 
-        # CRG --------------------------------------------------------------------------------------
+        # *********************************************************
+        # *                      CRG                              *
+        # *********************************************************
         self.submodules.crg = _CRG(platform, sys_clk_freq)
         platform.add_period_constraint(self.crg.cd_sys.clk, 1e9/100e6)
 
-        # DDR3 SDRAM -------------------------------------------------------------------------------
+        # *********************************************************
+        # *                      DDR3                             *
+        # *********************************************************
         self.submodules.ddrphy = s7ddrphy.A7DDRPHY(platform.request("ddram"),
             memtype      = "DDR3",
             nphases      = 4,
@@ -184,8 +205,9 @@ class PCIeAnalyzer(SoCSDRAM):
             geom_settings   = sdram_module.geom_settings,
             timing_settings = sdram_module.timing_settings)
 
-        # Ethernet ---------------------------------------------------------------------------------
-        # phy
+        # *********************************************************
+        # *                  Ethernet PHY                         *
+        # *********************************************************
         eth_phy = LiteEthPHYRGMII(
             clock_pads         = platform.request("eth_clocks"),
             pads               = platform.request("eth"),
@@ -195,7 +217,9 @@ class PCIeAnalyzer(SoCSDRAM):
         self.submodules.eth_phy = ClockDomainsRenamer("eth_tx")(eth_phy)
         self.add_csr("eth_phy")
 
-        # core
+        # *********************************************************
+        # *                  Ethernet Core                        *
+        # *********************************************************
         eth_core = LiteEthUDPIPCore(
             phy         = self.eth_phy,
             mac_address = 0x10e2d5000000,
@@ -203,7 +227,9 @@ class PCIeAnalyzer(SoCSDRAM):
             clk_freq    = 125000000)
         self.submodules.eth_core = ClockDomainsRenamer("eth_tx")(eth_core)
 
-        # etherbone bridge
+        # *********************************************************
+        # *                 Etherbone bridge                      *
+        # *********************************************************
         etherbone_cd = ClockDomain("etherbone") # similar to sys but need for correct
         self.clock_domains += etherbone_cd      # clock domain renaming
         self.comb += [
@@ -213,7 +239,9 @@ class PCIeAnalyzer(SoCSDRAM):
         self.submodules.etherbone = LiteEthEtherbone(self.eth_core.udp, 1234, cd="etherbone")
         self.add_wb_master(self.etherbone.wishbone.bus)
 
-        # timing constraints
+        # *********************************************************
+        # *          Timing constraints for Ethernet              *
+        # *********************************************************
         self.platform.add_period_constraint(self.eth_phy.crg.cd_eth_rx.clk, 1e9/125e6)
         self.platform.add_period_constraint(self.eth_phy.crg.cd_eth_tx.clk, 1e9/125e6)
         self.platform.add_false_path_constraints(
@@ -221,7 +249,9 @@ class PCIeAnalyzer(SoCSDRAM):
             self.eth_phy.crg.cd_eth_rx.clk,
             self.eth_phy.crg.cd_eth_tx.clk)
 
-        # GTP RefClk -------------------------------------------------------------------------------
+        # *********************************************************
+        # *                     GTP Refclk                        *
+        # *********************************************************
         refclk      = Signal()
         refclk_freq = 100e6
         refclk_pads = platform.request("pcie_refclk")
@@ -231,12 +261,16 @@ class PCIeAnalyzer(SoCSDRAM):
             i_IB    = refclk_pads.n,
             o_O     = refclk)
 
-        # GTP PLL ----------------------------------------------------------------------------------
+        # *********************************************************
+        # *                     GTP PLL                           *
+        # *********************************************************
         qpll = GTPQuadPLL(refclk, refclk_freq, linerate)
         print(qpll)
         self.submodules += qpll
 
-        # GTPs -------------------------------------------------------------------------------------
+        # *********************************************************
+        # *                       GTPs                            *
+        # *********************************************************
         for i in range(2):
             tx_pads = platform.request(connector + "_tx", i)
             rx_pads = platform.request(connector + "_rx", i)
@@ -246,6 +280,7 @@ class PCIeAnalyzer(SoCSDRAM):
                 tx_buffer_enable = True,
                 rx_buffer_enable = True)
             gtp.add_stream_endpoints()
+            gtp.tx_enable = 0
             setattr(self.submodules, "gtp"+str(i), gtp)
             platform.add_period_constraint(gtp.cd_tx.clk, 1e9/gtp.tx_clk_freq)
             platform.add_period_constraint(gtp.cd_rx.clk, 1e9/gtp.rx_clk_freq)
@@ -254,18 +289,28 @@ class PCIeAnalyzer(SoCSDRAM):
                 gtp.cd_tx.clk,
                 gtp.cd_rx.clk)
 
-        # Detect ordered sets / Descramble -----------------------------------------------------------
+        # *********************************************************
+        # *        Ordered Sets Detector / Descrambler            *
+        # *********************************************************
         self.submodules.rx_detector   = ClockDomainsRenamer("gtp0_rx")(DetectOrderedSets())
         self.submodules.rx_desrambler = ClockDomainsRenamer("gtp0_rx")(Descrambler())
-        self.comb += self.rx_detector.sink.connect(self.gtp0.source)
-        self.comb += self.rx_desrambler.sink.connect(self.rx_detector.source)
+        self.comb += [
+            self.gtp0.source.connect(self.rx_detector.sink, omit={"valid"}),
+            self.rx_detector.sink.valid.eq(qpll.lock & self.gtp0.rx_ready),
+            self.rx_detector.source.connect(self.rx_desrambler.sink),
+        ]
 
         self.submodules.tx_detector   = ClockDomainsRenamer("gtp1_rx")(DetectOrderedSets())
         self.submodules.tx_desrambler = ClockDomainsRenamer("gtp1_rx")(Descrambler())
-        self.comb += self.tx_detector.sink.connect(self.gtp1.source)
-        self.comb += self.tx_desrambler.sink.connect(self.tx_detector.source)
+        self.comb += [
+            self.gtp1.source.connect(self.tx_detector.sink, omit={"valid"}),
+            self.tx_detector.sink.valid.eq(qpll.lock & self.gtp1.rx_ready),
+            self.tx_detector.source.connect(self.tx_desrambler.sink),
+        ]
 
-        # Record -------------------------------------------------------------------------------------
+        # *********************************************************
+        # *                    Recorder                           *
+        # *********************************************************
         self.submodules.rx_dma_recorder = LiteDRAMDMAWriter(
             self.sdram.crossbar.get_port("write", 1024, clock_domain = "gtp0_rx"))
         self.rx_dma_recorder.add_csr()
@@ -278,39 +323,46 @@ class PCIeAnalyzer(SoCSDRAM):
 
         self.comb += [
 
-            self.rx_desrambler.source.ready.eq(1),
+            self.rx_desrambler.source.ready.eq(~self.rx_dma_recorder._done.status),
 
             self.rx_dma_recorder.sink.valid.eq(self.rx_desrambler.source.valid),
             self.rx_dma_recorder.sink.data.eq(self.rx_desrambler.source.payload.raw_bits()),
-    
-            self.tx_desrambler.source.ready.eq(self.tx_dma_recorder._done.status),
-    
+
+            self.tx_desrambler.source.ready.eq(~self.tx_dma_recorder._done.status),
+
             self.tx_dma_recorder.sink.valid.eq(self.tx_desrambler.source.valid),
             self.tx_dma_recorder.sink.data.eq(self.tx_desrambler.source.payload.raw_bits()),
         ]
 
+        # *********************************************************
+        # *                           LEDs                        *
+        # *********************************************************
+
+        led_counter = Signal(32)
+        self.sync += led_counter.eq(led_counter + 1)
+        self.comb += platform.request("user_led", 0).eq(led_counter[26])
+
+        self.comb += platform.request("user_led", 1).eq(qpll.lock & self.gtp0.rx_ready)
+        self.comb += platform.request("user_led", 2).eq(qpll.lock & self.gtp1.rx_ready)
+        self.comb += platform.request("user_led", 3).eq(0)
+
+        # *********************************************************
+        # *                          ILA                          *
+        # *********************************************************
         from litescope import LiteScopeAnalyzer
         analyzer_signals = [
             self.rx_desrambler.source.data,
             self.rx_desrambler.source.ctrl,
-            self.rx_detector.word0,
-            self.rx_detector.word1,
-            self.rx_detector.word2,
-            self.rx_detector.word3,
-            self.rx_detector.word4,
-            self.rx_detector.word5,
-            self.rx_detector.word6,
-            self.rx_detector.word7,
-            self.rx_detector.word8,
-            self.rx_detector.word9,
-            self.rx_detector.source.type,
-            self.rx_detector.source.ctrl,
-            self.rx_detector.source.data,
-            self.gtp0.source.data,
-            self.gtp0.source.ctrl
+            self.rx_desrambler.source.type,
+            self.rx_desrambler.source.ready,
+            self.rx_desrambler.source.valid,
+            self.rx_desrambler.sink.valid,
+            self.rx_desrambler.sink.ready,
+            self.rx_dma_recorder.offset,
+            self.rx_dma_recorder.fsm,
         ]
 
-        self.submodules.analyzer = ClockDomainsRenamer("gtp0_rx")(LiteScopeAnalyzer(analyzer_signals, 4096, csr_csv="tools/analyzer.csv"))
+        self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals, 4096, clock_domain="gtp0_rx", csr_csv="tools/analyzer.csv")
         self.add_csr("analyzer")
 
 # Load ---------------------------------------------------------------------------------------------

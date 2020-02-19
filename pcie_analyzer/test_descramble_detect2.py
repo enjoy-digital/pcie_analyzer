@@ -12,7 +12,6 @@ from litex.soc.interconnect.stream import *
 from litex.soc.interconnect.stream_sim import *
 
 from descrambler import *
-from detect_ordered_sets import *
 
 values=[]
 
@@ -48,6 +47,7 @@ class TB(Module):
             self.descrambler.sink.data.eq(self.detect.source.data),
             self.descrambler.sink.ctrl.eq(self.detect.source.ctrl),
             self.descrambler.sink.osets.eq(self.detect.source.osets),
+            self.descrambler.sink.type.eq(self.detect.source.type),
             self.descrambler.source.ready.eq(1),
         ]
 
