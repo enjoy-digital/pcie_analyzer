@@ -15,6 +15,7 @@ from litex.soc.integration.soc_sdram import *
 from litex.soc.integration.builder import *
 from litex.soc.cores import uart
 
+from litedram import modules as litedram_modules
 from litedram.common import PhySettings
 from litedram.modules import MT48LC16M16
 from litedram.phy.model import SDRAMPHYModel
@@ -53,7 +54,7 @@ class Platform(SimPlatform):
 # PCIeAnalyzer -------------------------------------------------------------------------------------
 
 class PCIeAnalyzer(SoCSDRAM):
-    def __init__(self, **kwargs):
+    def __init__(self, sdram_module, sdram_data_width, **kwargs):
         platform     = Platform()
         sys_clk_freq = int(1e6)
 
@@ -71,21 +72,19 @@ class PCIeAnalyzer(SoCSDRAM):
         self.submodules.crg = CRG(platform.request("sys_clk"))
 
         # SDR SDRAM --------------------------------------------------------------------------------
-        sdram_module = MT48LC16M16(100e6, "1:1") # use 100MHz timings
-        phy_settings = PhySettings(
-            memtype       = "SDR",
-            databits      = 32,
-            dfi_databits  = 16,
-            nphases       = 1,
-            rdphase       = 0,
-            wrphase       = 0,
-            rdcmdphase    = 0,
-            wrcmdphase    = 0,
-            cl            = 2,
-            read_latency  = 4,
-            write_latency = 0
-        )
-        self.submodules.sdrphy = SDRAMPHYModel(sdram_module, phy_settings)
+        from litex.tools.litex_sim import sdram_module_nphases, get_sdram_phy_settings
+        sdram_clk_freq   = int(100e6) # FIXME: use 100MHz timings
+        sdram_module_cls = getattr(litedram_modules, sdram_module)
+        sdram_rate       = "1:{}".format(sdram_module_nphases[sdram_module_cls.memtype])
+        sdram_module     = sdram_module_cls(sdram_clk_freq, sdram_rate)
+        phy_settings     = get_sdram_phy_settings(
+            memtype    = sdram_module.memtype,
+            data_width = sdram_data_width,
+            clk_freq   = sdram_clk_freq)
+        self.submodules.sdrphy = SDRAMPHYModel(
+            module    = sdram_module,
+            settings  = phy_settings,
+            clk_freq  = sdram_clk_freq)
         self.register_sdram(
             self.sdrphy,
             sdram_module.geom_settings,
@@ -131,12 +130,14 @@ def main():
     parser = argparse.ArgumentParser(description="PCIeAnalyzer LiteX SoC Simulation")
     builder_args(parser)
     soc_sdram_args(parser)
-    parser.add_argument("--threads",     default=1,           help="Set number of threads (default=1)")
-    parser.add_argument("--rom-init",    default=None,        help="rom_init file")
-    parser.add_argument("--trace",       action="store_true", help="Enable VCD tracing")
-    parser.add_argument("--trace-start", default=0,           help="Cycle to start VCD tracing")
-    parser.add_argument("--trace-end",   default=-1,          help="Cycle to end VCD tracing")
-    parser.add_argument("--opt-level",   default="O0",        help="Compilation optimization level")
+    parser.add_argument("--threads",          default=1,              help="Set number of threads (default=1)")
+    parser.add_argument("--rom-init",         default=None,           help="rom_init file")
+    parser.add_argument("--sdram-module",     default="MT8JTF12864",  help="Select SDRAM chip")
+    parser.add_argument("--sdram-data-width", default=32,             help="Set SDRAM chip data width")
+    parser.add_argument("--trace",            action="store_true",    help="Enable VCD tracing")
+    parser.add_argument("--trace-start",      default=0,              help="Cycle to start VCD tracing")
+    parser.add_argument("--trace-end",        default=-1,             help="Cycle to end VCD tracing")
+    parser.add_argument("--opt-level",        default="O0",           help="Compilation optimization level")
     args = parser.parse_args()
 
     soc_kwargs     = {}
@@ -150,7 +151,10 @@ def main():
     sim_config.add_module("ethernet", "eth", args={"interface": "tap0", "ip": "192.168.1.100"})
 
     # Build  ---------------------------------------------------------------------------------------
-    soc     = PCIeAnalyzer(**soc_kwargs)
+    soc     = PCIeAnalyzer(
+        sdram_module     = args.sdram_module,
+        sdram_data_width = args.sdram_data_width,
+        **soc_kwargs)
     builder = Builder(soc, csr_csv="tools/csr.csv")
     vns = builder.build(threads=args.threads, sim_config=sim_config,
         opt_level   = args.opt_level,
