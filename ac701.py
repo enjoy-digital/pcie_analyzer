@@ -3,6 +3,8 @@
 # This file is Copyright (c) 2020 Florent Kermarrec <florent@enjoy-digital.fr>
 # License: BSD
 
+import os
+import argparse
 import sys
 
 from migen import *
@@ -122,7 +124,7 @@ _io = [
 
 class Platform(XilinxPlatform):
     def __init__(self):
-        XilinxPlatform.__init__(self, "xc7a200t-fbg676-2", _io, toolchain="vivado")
+        XilinxPlatform.__init__(self, "xc7a200t-fbg676-2", _io, toolchain="vivado", name="ac701")
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -268,23 +270,22 @@ class PCIeAnalyzer(SoCSDRAM):
             self.tx_dma_recorder.sink.data.eq(self.gtp1.source.payload.raw_bits()),
         ]
 
-# Load ---------------------------------------------------------------------------------------------
-
-def load():
-    from litex.build.xilinx import VivadoProgrammer
-    prog = VivadoProgrammer()
-    prog.load_bitstream("build/gateware/ac701.bit")
-    exit()
-
 # Build --------------------------------------------------------------------------------------------
 
 def main():
-    if "load" in sys.argv[1:]:
-        load()
+    parser = argparse.ArgumentParser(description="PCIe Analyzer SoC on AC701")
+    parser.add_argument("--build", action="store_true", help="Build bitstream")
+    parser.add_argument("--load",  action="store_true", help="Load bitstream")
+    args = parser.parse_args()
+
     platform = Platform()
-    soc     = PCIeAnalyzer(platform)
-    builder = Builder(soc, output_dir="build", csr_csv="tools/csr.csv")
-    builder.build(build_name="ac701")
+    soc      = PCIeAnalyzer(platform)
+    builder  = Builder(soc, csr_csv="tools/csr.csv")
+    builder.build(run=args.build)
+
+    if args.load:
+        prog = soc.platform.create_programmer()
+        prog.load_bitstream(os.path.join(builder.gateware_dir, soc.build_name + ".bit"))
 
 if __name__ == "__main__":
     main()

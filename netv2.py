@@ -3,8 +3,9 @@
 # This file is Copyright (c) 2020 Florent Kermarrec <florent@enjoy-digital.fr>
 # License: BSD
 
-import sys
+import os
 import argparse
+import sys
 
 from migen import *
 
@@ -243,32 +244,20 @@ class PCIeAnalyzer(SoCSDRAM):
 # Build --------------------------------------------------------------------------------------------
 
 def main():
-    with open("README.md") as f:
-        description = [str(f.readline()) for i in range(1, 9)]
-    parser = argparse.ArgumentParser(description="".join(description[1:]), formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(description="PCIe Analyzer SoC on AC701")
     parser.add_argument("--build", action="store_true", help="Build bitstream")
     parser.add_argument("--load",  action="store_true", help="Load bitstream")
-    parser.add_argument("--flash", action="store_true", help="Flash bitstream")
     args = parser.parse_args()
-
-    if args.load:
-        from litex.build.openocd import OpenOCD
-        prog = OpenOCD("openocd/openocd.cfg")
-        prog.load_bitstream("build/gateware/top.bit")
-        exit()
-
-    if args.flash:
-        from litex.build.openocd import OpenOCD
-        prog = OpenOCD("openocd/openocd.cfg", flash_proxy_basename="openocd/bscan_spi_xc7a35t.bit")
-        prog.set_flash_proxy_dir(".")
-        prog.flash(0, "build/gateware/top.bin")
-        exit()
 
     platform = netv2.Platform()
     platform.add_extension(_pcie_analyzer_io)
     soc      = PCIeAnalyzer(platform)
-    builder  = Builder(soc, output_dir="build", csr_csv="tools/csr.csv")
+    builder  = Builder(soc, csr_csv="tools/csr.csv")
     builder.build(run=args.build)
+
+    if args.load:
+        prog = soc.platform.create_programmer()
+        prog.load_bitstream(os.path.join(builder.gateware_dir, soc.build_name + ".bit"))
 
 if __name__ == "__main__":
     main()
